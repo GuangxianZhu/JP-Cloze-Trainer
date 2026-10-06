@@ -4,6 +4,11 @@
 
 ## 运行（Windows）
 
+**双击 `start.bat`** 就行。第一次会自动创建虚拟环境 `.venv` 并安装 Panda3D（需要联网，一两分钟），之后双击直接启动。
+需要先装好 Python 3.10+（安装时勾选 "Add python.exe to PATH"）。
+
+手动运行也可以：
+
 ```bat
 pip install -r requirements.txt
 python main.py
