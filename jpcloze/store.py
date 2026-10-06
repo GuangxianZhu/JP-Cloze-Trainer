@@ -30,12 +30,16 @@ class Store:
                    timed_out INTEGER NOT NULL DEFAULT 0)"""
         )
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_attempts_qid ON attempts(qid)")
+        cols = {r[1] for r in self.conn.execute("PRAGMA table_info(attempts)")}
+        if "mode" not in cols:   # 旧数据库升级
+            self.conn.execute("ALTER TABLE attempts ADD COLUMN mode TEXT NOT NULL DEFAULT 'choice'")
         self.conn.commit()
 
-    def record(self, qid: str, correct: bool, rt: float, timed_out: bool = False) -> None:
+    def record(self, qid: str, correct: bool, rt: float, timed_out: bool = False,
+               mode: str = "choice", ts: float | None = None) -> None:
         self.conn.execute(
-            "INSERT INTO attempts(qid, ts, correct, rt, timed_out) VALUES (?,?,?,?,?)",
-            (qid, time.time(), int(correct), float(rt), int(timed_out)),
+            "INSERT INTO attempts(qid, ts, correct, rt, timed_out, mode) VALUES (?,?,?,?,?,?)",
+            (qid, time.time() if ts is None else ts, int(correct), float(rt), int(timed_out), mode),
         )
         self.conn.commit()
 
