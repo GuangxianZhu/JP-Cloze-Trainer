@@ -1,0 +1,7 @@
+{
+  "round_size": 20,
+  "time_scale": 1.0,
+  "font_ja": "",
+  "font_zh": "",
+  "db_path": "progress.db"
+}
