@@ -1,6 +1,9 @@
 {
   "round_size": 20,
   "time_scale": 1.0,
+  "voice": true,
+  "daily_goal": 40,
+  "mode": "choice",
   "font_ja": "",
   "font_zh": "",
   "db_path": "progress.db"

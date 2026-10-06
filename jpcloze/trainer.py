@@ -71,12 +71,15 @@ def shuffled_options(q: Question, rng: random.Random | None = None) -> list[str]
 @dataclass
 class RoundItem:
     question: Question
-    chosen: str | None      # None = 超时
+    chosen: str | None      # None = 超时；打字模式下是打出来的假名
     rt: float
     limit: float
+    ok: bool | None = None  # 打字模式由外部判定对错
 
     @property
     def correct(self) -> bool:
+        if self.ok is not None:
+            return self.ok
         return self.chosen == self.question.answer
 
     @property
@@ -158,3 +161,113 @@ def level_progress(questions: list[Question], history: dict[str, list[Attempt]])
     for q in questions:
         counts[question_state(history.get(q.id, []))] += 1
     return counts
+
+
+# ---------------- 今日复习（间隔重复） ----------------
+DAY = 86400.0
+INTERVAL_DAYS = [0, 1, 3, 7, 14, 30]   # 按「连续答对次数」决定下次复习间隔
+
+
+def correct_streak(attempts: list[Attempt]) -> int:
+    n = 0
+    for a in reversed(attempts):
+        if not a.correct:
+            break
+        n += 1
+    return n
+
+
+def next_due(attempts: list[Attempt]) -> float | None:
+    """下次该复习的时间戳；没做过的题返回 None（不算复习）。"""
+    if not attempts:
+        return None
+    last = attempts[-1]
+    if not last.correct:
+        return last.ts                      # 错了：马上复习
+    streak = correct_streak(attempts)
+    days = INTERVAL_DAYS[min(streak, len(INTERVAL_DAYS) - 1)]
+    if last.rt > SLOW_RT:                   # 对了但慢：明天再来
+        days = min(days, 1)
+    return last.ts + days * DAY
+
+
+def due_questions(questions: list[Question], history: dict[str, list[Attempt]],
+                  now: float) -> list[Question]:
+    out = []
+    for q in questions:
+        d = next_due(history.get(q.id, []))
+        if d is not None and d <= now:
+            out.append(q)
+    # 越早到期越优先
+    out.sort(key=lambda q: next_due(history[q.id]))
+    return out
+
+
+# ---------------- 学习记录 ----------------
+@dataclass
+class DayStat:
+    day: str        # YYYY-MM-DD（本地时间）
+    n: int
+    correct: int
+    avg_rt: float   # 答对的平均用时，没有时为 nan
+
+    @property
+    def accuracy(self) -> float:
+        return self.correct / self.n if self.n else 0.0
+
+
+def daily_stats(history: dict[str, list[Attempt]], days: int, now: float) -> list[DayStat]:
+    import time as _t
+    buckets: dict[str, list[Attempt]] = {}
+    for atts in history.values():
+        for a in atts:
+            buckets.setdefault(_t.strftime("%Y-%m-%d", _t.localtime(a.ts)), []).append(a)
+    out = []
+    for i in range(days - 1, -1, -1):
+        key = _t.strftime("%Y-%m-%d", _t.localtime(now - i * DAY))
+        atts = buckets.get(key, [])
+        ok = [a.rt for a in atts if a.correct]
+        out.append(DayStat(key, len(atts), len(ok), mean(ok) if ok else float("nan")))
+    return out
+
+
+def study_streak_days(history: dict[str, list[Attempt]], now: float) -> int:
+    """连续学习天数（今天没做也从昨天往前数）。"""
+    import time as _t
+    days = {_t.strftime("%Y-%m-%d", _t.localtime(a.ts)) for atts in history.values() for a in atts}
+    n = 0
+    t = now
+    if _t.strftime("%Y-%m-%d", _t.localtime(t)) not in days:
+        t -= DAY
+    while _t.strftime("%Y-%m-%d", _t.localtime(t)) in days:
+        n += 1
+        t -= DAY
+    return n
+
+
+def today_count(history: dict[str, list[Attempt]], now: float) -> int:
+    import time as _t
+    today = _t.strftime("%Y-%m-%d", _t.localtime(now))
+    return sum(1 for atts in history.values() for a in atts
+               if _t.strftime("%Y-%m-%d", _t.localtime(a.ts)) == today)
+
+
+# ---------------- 模式 ----------------
+MODES = ["choice", "typing", "listening"]
+MODE_LABEL = {"choice": "选择", "typing": "打字", "listening": "听力"}
+MODE_TIME_FACTOR = {"choice": 1.0, "typing": 2.0, "listening": 1.0}
+NO_TYPING_LEVELS = {3, 6}   # 搭配和语感题没有选项会有多个答案，不进打字模式
+
+
+def eligible(q: Question, mode: str, no_typing: set[str], has_audio: set[str]) -> bool:
+    if mode == "choice":
+        return True
+    if mode == "listening":
+        return q.id in has_audio
+    # typing
+    if q.level in NO_TYPING_LEVELS or q.id in no_typing:
+        return False
+    answers = q.typing_answers()
+    if not answers:
+        return False
+    return bool(q.hint) or len(answers[0]) <= 3

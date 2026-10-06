@@ -81,5 +81,65 @@ class StoreAndStatsTest(unittest.TestCase):
         self.assertEqual(s.tag_stats()[0].tag, q2.tags[0])  # 错的排在前面
 
 
+class RomajiTest(unittest.TestCase):
+    def test_convert(self):
+        from jpcloze.romaji import convert, finalize
+        cases = {"tabete": "たべて", "konnichiha": "こんにちは", "kitte": "きって",
+                 "benkyousuru": "べんきょうする", "chotto": "ちょっと", "shinbun": "しんぶん",
+                 "furarete": "ふられて", "sanpo": "さんぽ", "kyou": "きょう", "oyasumi": "おやすみ"}
+        for r, k in cases.items():
+            self.assertEqual(finalize(r), k, r)
+        self.assertEqual(convert("tab"), "たb")       # 没拼完的保留
+        self.assertEqual(finalize("hon"), "ほん")      # 末尾 n → ん
+
+
+class ReviewAndModesTest(unittest.TestCase):
+    def test_due(self):
+        from jpcloze.trainer import DAY, due_questions, next_due
+        b = load_bank(ROOT / "data")
+        q1, q2, q3 = b.questions["L1-001"], b.questions["L1-002"], b.questions["L1-003"]
+        now = 100 * DAY
+        hist = {
+            q1.id: [Attempt(q1.id, False, 3, False, now - 10)],                     # 错 → 到期
+            q2.id: [Attempt(q2.id, True, 2, False, now - 0.5 * DAY)],               # 对 1 次，间隔 1 天 → 未到期
+            q3.id: [Attempt(q3.id, True, 2, False, now - 2 * DAY)],                 # 对 1 次，2 天前 → 到期
+        }
+        due = {q.id for q in due_questions([q1, q2, q3], hist, now)}
+        self.assertEqual(due, {q1.id, q3.id})
+        self.assertIsNone(next_due([]))
+
+    def test_eligible(self):
+        from jpcloze.trainer import eligible
+        b = load_bank(ROOT / "data")
+        audio = set(b.audio)
+        typing = [q for q in b.questions.values() if eligible(q, "typing", b.no_typing, audio)]
+        self.assertGreater(len(typing), 100)
+        self.assertTrue(all(q.level not in (3, 6) for q in typing))
+        self.assertTrue(all(q.typing_answers() for q in typing))
+        self.assertEqual(len([q for q in b.questions.values()
+                              if eligible(q, "listening", b.no_typing, audio)]), len(audio))
+
+    def test_cards_cover_tags(self):
+        b = load_bank(ROOT / "data")
+        missing = {t for q in b.questions.values() for t in q.tags if t not in b.cards}
+        self.assertEqual(missing, set())
+
+    def test_store_migration(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "old.db"
+            c = sqlite3.connect(p)
+            c.execute("CREATE TABLE attempts(id INTEGER PRIMARY KEY AUTOINCREMENT, qid TEXT NOT NULL,"
+                      " ts REAL NOT NULL, correct INTEGER NOT NULL, rt REAL NOT NULL,"
+                      " timed_out INTEGER NOT NULL DEFAULT 0)")
+            c.execute("INSERT INTO attempts(qid, ts, correct, rt) VALUES ('L1-001', 1, 1, 2.0)")
+            c.commit()
+            c.close()
+            s = Store(p)
+            s.record("L1-002", False, 3.0, mode="typing")
+            self.assertEqual(s.total_attempts(), 2)
+            s.close()
+
+
 if __name__ == "__main__":
     unittest.main()
