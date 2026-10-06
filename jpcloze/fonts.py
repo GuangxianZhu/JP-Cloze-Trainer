@@ -30,13 +30,28 @@ ZH_CANDIDATES = [
 ]
 
 
-def find_font(override: str | None, candidates: list[Path]) -> Path | None:
+def font_candidates(override: str | None, candidates: list[Path]) -> list[Path]:
+    """返回存在的字体路径（配置的优先）。
+
+    路径会用 resolve() 换成磁盘上的真实大小写：Windows 的 WINDIR 常常是
+    "C:\\WINDOWS"，而真实目录是 "C:\\Windows"，Panda3D 会因为大小写不一致而拒绝加载。
+    """
+    found: list[Path] = []
     if override:
         p = Path(override).expanduser()
         if p.exists():
-            return p
-        print(f"[字体] 配置里的字体不存在：{p}，改为自动查找", file=sys.stderr)
+            found.append(p)
+        else:
+            print(f"[字体] 配置里的字体不存在：{p}，改为自动查找", file=sys.stderr)
     for p in candidates:
         if p.exists():
-            return p
-    return None
+            found.append(p)
+    out: list[Path] = []
+    for p in found:
+        try:
+            p = p.resolve()
+        except OSError:
+            pass
+        if p not in out:
+            out.append(p)
+    return out

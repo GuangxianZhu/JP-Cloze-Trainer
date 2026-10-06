@@ -21,7 +21,7 @@ from panda3d.core import (Filename, TextNode, TextProperties, TextPropertiesMana
                           loadPrcFileData)
 
 from .bank import Bank, Question, load_bank
-from .fonts import JA_CANDIDATES, ZH_CANDIDATES, find_font
+from .fonts import JA_CANDIDATES, ZH_CANDIDATES, font_candidates
 from .store import Store
 from .trainer import (STATE_LABEL, RoundItem, RoundSummary, level_progress,
                       overall_tag_stats, pick_round, question_state, shuffled_options,
@@ -68,6 +68,7 @@ def configure_window(extra_prc: str = "") -> None:
         framebuffer-multisample 1
         multisamples 4
         sync-video 1
+        vfs-case-sensitive 0
     """ + extra_prc)
 
 
@@ -112,15 +113,18 @@ class ClozeApp(ShowBase):
 
     # ---------- 基础 ----------
     def _load_font(self, override, candidates, label):
-        path = find_font(override, candidates)
-        if path is None:
-            print(f"[字体] 没找到{label}字体，文字会显示成方块。请在 config.json 里设置字体路径。",
-                  file=sys.stderr)
-            return None
-        font = self.loader.loadFont(Filename.fromOsSpecific(str(path)).getFullpath())
-        font.setPixelsPerUnit(72)
-        font.setPageSize(1024, 1024)
-        return font
+        for path in font_candidates(override, candidates):
+            try:
+                font = self.loader.loadFont(Filename.fromOsSpecific(str(path)).getFullpath())
+            except (OSError, IOError) as e:
+                print(f"[字体] {label}字体加载失败，换下一个：{path}（{e}）", file=sys.stderr)
+                continue
+            font.setPixelsPerUnit(72)
+            font.setPageSize(1024, 1024)
+            return font
+        print(f"[字体] 没找到可用的{label}字体，文字会显示成方块。请在 config.json 里设置字体路径。",
+              file=sys.stderr)
+        return None
 
     def _setup_text_colors(self):
         tpm = TextPropertiesManager.getGlobalPtr()
